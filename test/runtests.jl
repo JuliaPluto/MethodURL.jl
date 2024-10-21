@@ -19,6 +19,8 @@ using HTTP: request
 using InteractiveUtils: @which
 
 # Package to test URLs on
+using LinearAlgebra: det
+using Statistics: mean
 using Plots: Plots # has sub-repositories
 using Arxiv: @arXiv_str # hosted on GitLab
 using GPMaxlik: gnll # hosted on sourcehut
@@ -75,17 +77,23 @@ end
             u = first(@inferred url(m))
             # @test url_exists(u)
         end
-        # @testset "Stdlib" begin
-        #     m = @which @test true
-        #     u = first(@inferred url(m))
-        #     # @test url_exists(u)
-        # end
-        # @testset "Local" begin
-        #     _m = @which sqrt(1.0)
-        #     m = @which url(_m)
-        #     u = first(@inferred url(m))
-        #     # @test url_exists(u)
-        # end
+        @testset "Stdlib" begin
+            @testset "within julialang/julia" begin
+                m = @which @test true
+                u = first(@inferred url(m))
+                # @test url_exists(u)
+
+                m = @which det(rand(2, 2))
+                u = first(@inferred url(m))
+                # @test url_exists(u)
+            end
+            @testset "own repository" begin
+                m = @which mean(rand(5))
+                u = first(@inferred url(m))
+                # @test url_exists(u)
+            end
+        end
+
         @testset "External" begin
             @testset "GitHub" begin
                 m = @which Aqua.test_all(MethodURL)
@@ -108,5 +116,10 @@ end
                 # @test url_exists(u) # no tags in GPMaxlik.jl
             end
         end
+        # @testset "Local" begin
+        #     m = @which url(@which sqrt(1.0))
+        #     u = first(@inferred url(m))
+        #     # @test url_exists(u)
+        # end
     end
 end

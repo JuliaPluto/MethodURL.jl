@@ -3,7 +3,7 @@
 
 module MethodURL
 
-using Base: PkgId, UUID, inbase
+using Base: PkgId, UUID, Sys, inbase
 using RegistryInstances: reachable_registries, registry_info
 
 export url
@@ -35,9 +35,6 @@ function repos_package(uuid::UUID)
             push!(repos, info.repo)
         end
     end
-    if isempty(repos)
-        error("Failed to find reachable repository matching UUID $uuid.")
-    end
     return repos
 end
 
@@ -54,6 +51,9 @@ function _pkgdir(M::Module)
     isnothing(dir) && error("Failed to find directory of package $M.")
     return dir
 end
+
+# TODO: is this heuristic sufficient?
+instdlib(pkgdir) = contains(pkgdir, Sys.STDLIB)
 
 # TODO: If package is devved use local path
 # TODO: If package is added by URL, use that
@@ -75,20 +75,28 @@ function url(m::Method)
         push!(urls, url)
     else
         uuid = _uuid(M)
-        pkg_splitpath = splitpath(_pkgdir(M))
-        file_splitpath = splitpath(file)
-        while !isempty(pkg_splitpath) && first(pkg_splitpath) == first(file_splitpath)
-            popfirst!(pkg_splitpath)
-            popfirst!(file_splitpath)
-        end
-        local_dir = join(file_splitpath, "/")
+        repos = repos_package(uuid)
+        pkgdir = _pkgdir(M)
 
-        v = string(pkgversion(M))
-        for repo in repos_package(uuid)
-            url = repo_and_path_to_url(repo, v, local_dir, line)
+        if isempty(repos) && instdlib(pkgdir) # stdlib package
+            package, file = match(r"/stdlib/v(?:.*?)/(.*?)/src/(.*)", file).captures
+            url = "https://github.com/JuliaLang/julia/blob/v$VERSION/stdlib/$package/src/$file#L$line"
             push!(urls, url)
+        else # external package
+            pkg_splitpath = splitpath(pkgdir)
+            file_splitpath = splitpath(file)
+            while !isempty(pkg_splitpath) && first(pkg_splitpath) == first(file_splitpath)
+                popfirst!(pkg_splitpath)
+                popfirst!(file_splitpath)
+            end
+            local_dir = join(file_splitpath, "/")
+
+            v = string(pkgversion(M))
+            for repo in repos
+                url = repo_and_path_to_url(repo, v, local_dir, line)
+                push!(urls, url)
+            end
         end
-        @info M file uuid _pkgdir(M) first(repos_package(uuid)) local_dir v
     end
     return urls
 end
