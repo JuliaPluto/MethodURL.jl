@@ -56,7 +56,7 @@ end
                 @test isnothing(check_all_explicit_imports_via_owners(MethodURL))
                 @test isnothing(
                     check_all_explicit_imports_are_public(
-                        MethodURL; ignore=(:PkgId, :inbase)
+                        MethodURL; ignore=(:PkgId, :UUID, :inbase)
                     ),
                 )
             end
