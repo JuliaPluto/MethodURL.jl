@@ -1,5 +1,6 @@
 using MethodURL
 
+# Linting tests
 using Test
 using JuliaFormatter: JuliaFormatter
 using Aqua: Aqua
@@ -13,8 +14,14 @@ using ExplicitImports:
     check_all_qualified_accesses_via_owners,
     check_all_qualified_accesses_are_public
 
+# Packages used for testing
 using HTTP: request
 using InteractiveUtils: @which
+
+# Package to test URLs on
+using Plots: Plots # has sub-repositories
+using Arxiv: @arXiv_str # hosted on GitLab
+using GPMaxlik: gnll # hosted on sourcehut
 
 function url_exists(url)
     response = request("GET", url; status_exception=false, redirect=true, retry=true)
@@ -64,25 +71,42 @@ end
     end
     @testset verbose = true "URL" begin
         @testset "Base" begin
-            m1 = @which sqrt(1.0)
-            u1 = first(@inferred url(m1))
-            # @test url_exists(u1)
+            m = @which sqrt(0.0)
+            u = first(@inferred url(m))
+            # @test url_exists(u)
         end
         # @testset "Stdlib" begin
-        #     m2 = @which @test true
-        #     u2 = first(@inferred url(m2))
-        #     # @test url_exists(u2)
+        #     m = @which @test true
+        #     u = first(@inferred url(m))
+        #     # @test url_exists(u)
         # end
         # @testset "Local" begin
         #     _m = @which sqrt(1.0)
-        #     m3 = @which url(_m)
-        #     u3 = first(@inferred url(m3))
-        #     # @test url_exists(u3)
+        #     m = @which url(_m)
+        #     u = first(@inferred url(m))
+        #     # @test url_exists(u)
         # end
         @testset "External" begin
-            m4 = @which Aqua.test_all(MethodURL)
-            u4 = first(@inferred url(m4))
-            # @test url_exists(u4)
+            @testset "GitHub" begin
+                m = @which Aqua.test_all(MethodURL)
+                u = first(@inferred url(m))
+                # @test url_exists(u)
+            end
+            @testset "GitHub monorepo" begin
+                m = first(methods(Plots.RecipesBase.create_kw_body))
+                u = first(@inferred url(m))
+                # @test url_exists(u)
+            end
+            @testset "GitLab" begin
+                m = @which arXiv"1234.5678"
+                u = first(@inferred url(m))
+                # @test url_exists(u) # no tags in Arxiv.jl
+            end
+            @testset "Sourcehut" begin
+                m = first(methods(gnll))
+                u = first(@inferred url(m))
+                # @test url_exists(u) # no tags in GPMaxlik.jl
+            end
         end
     end
 end

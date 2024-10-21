@@ -12,7 +12,14 @@ function repo_and_path_to_url(repo, version, path, line)
     repo = chopsuffix(repo, ".git")
     # TODO: Handle more git forges
     if startswith(repo, "https://github.com")
+        # https://github.com/owner/Package.jl/blob/v0.1.0/src/foo.jl#L42
         return join([repo, "blob", "v" * version, path * "#L$line"], "/")
+    elseif startswith(repo, "https://gitlab.com")
+        # https://gitlab.com/owner/Package.jl/-/blob/v0.1.0/src/foo.jl#L42
+        return join([repo, "-", "blob", "v" * version, path * "#L$line"], "/")
+    elseif startswith(repo, "https://git.sr.ht")
+        # https://git.sr.ht/~owner/Package.jl/tree/v0.1.0/item/src/foo.jl#L42
+        return join([repo, "tree", "v" * version, "item", path * "#L$line"], "/")
     else
         error("Failed to construct URL for repository $repo.")
     end
@@ -27,6 +34,9 @@ function repos_package(uuid::UUID)
             info = registry_info(entry)
             push!(repos, info.repo)
         end
+    end
+    if isempty(repos)
+        error("Failed to find reachable repository matching UUID $uuid.")
     end
     return repos
 end
@@ -47,6 +57,7 @@ end
 
 # TODO: If package is devved use local path
 # TODO: If package is added by URL, use that
+# TODO: Support monorepos
 function url(m::Method)
     M = parentmodule(m)
     file = String(m.file)
@@ -71,13 +82,13 @@ function url(m::Method)
             popfirst!(file_splitpath)
         end
         local_dir = join(file_splitpath, "/")
-        # @info M file uuid _pkgdir(M) local_dir
 
         v = string(pkgversion(M))
         for repo in repos_package(uuid)
             url = repo_and_path_to_url(repo, v, local_dir, line)
             push!(urls, url)
         end
+        @info M file uuid _pkgdir(M) first(repos_package(uuid)) local_dir v
     end
     return urls
 end
