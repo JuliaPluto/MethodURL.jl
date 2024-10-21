@@ -14,6 +14,7 @@ using ExplicitImports:
     check_all_qualified_accesses_are_public
 
 using HTTP: request
+using InteractiveUtils: @which
 
 function url_exists(url)
     response = request("GET", url; status_exception=false, redirect=true, retry=true)
@@ -27,17 +28,17 @@ end
 
 @testset verbose = true "MethodURL.jl" begin
     @testset verbose = true "Linting" begin
-        @testset "Code formatting (JuliaFormatter.jl)" begin
+        @testset "JuliaFormatter.jl" begin
             @test JuliaFormatter.format(MethodURL; verbose=false, overwrite=false)
         end
-        @testset "Code quality (Aqua.jl)" begin
+        @testset "Aqua.jl" begin
             Aqua.test_all(MethodURL)
         end
-        @testset "Code linting (JET.jl)" begin
+        @testset "JET.jl" begin
             JET.test_package(MethodURL; target_defined_modules=true)
         end
 
-        @testset "Code imports (ExplicitImports.jl)" begin
+        @testset "ExplicitImports.jl" begin
             @testset "Improper implicit imports" begin
                 @test isnothing(check_no_implicit_imports(MethodURL))
             end
