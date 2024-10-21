@@ -1,7 +1,11 @@
 name = "MethodURL"
 uuid = "461c4225-bb7a-4706-8416-467e5545dbd6"
-authors = ["Adrian Hill <gh@adrianhill.de>"]
-version = "1.0.0-DEV"
+authors = ["Adrian Hill <gh@adrianhill.de>", "Kristoffer Carlsson"]
+version = "0.1.0-DEV"
+
+[deps]
+RegistryInstances = "2792f1a3-b283-48e8-9a74-f99dce5104f3"
 
 [compat]
+RegistryInstances = "0.1"
 julia = "1.10"
