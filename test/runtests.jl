@@ -91,7 +91,9 @@ end
             @testset "standalone repository" begin
                 m = @which mean(rand(5))
                 u = first(@inferred url(m))
-                @test url_exists(u)
+                if VERSION > v"1.10" # no tag for Statistics.jl v1.10.0
+                    @test url_exists(u)
+                end
             end
         end
 
