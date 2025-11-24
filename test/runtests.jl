@@ -2,7 +2,6 @@ using MethodURL
 
 # Linting tests
 using Test
-using JuliaFormatter: JuliaFormatter
 using Aqua: Aqua
 using JET: JET
 using ExplicitImports:
@@ -27,7 +26,7 @@ using GPMaxlik: gnll # hosted on sourcehut
 
 function url_exists(url)
     url = replace(url, r"#.*$" => "") # strip line number
-    response = request("GET", url; status_exception=false, redirect=true, retry=true)
+    response = request("GET", url; status_exception = false, redirect = true, retry = true)
     if 200 ≤ response.status < 400
         return true
     else
@@ -38,14 +37,13 @@ end
 
 @testset verbose = true "MethodURL.jl" begin
     @testset verbose = true "Linting" begin
-        @testset "JuliaFormatter.jl" begin
-            @test JuliaFormatter.format(MethodURL; verbose=false, overwrite=false)
-        end
         @testset "Aqua.jl" begin
             Aqua.test_all(MethodURL)
         end
-        @testset "JET.jl" begin
-            JET.test_package(MethodURL; target_defined_modules=true)
+        if VERSION > v"1.11" # JET v0.11 requires Julia v1.12
+            @testset "JET tests" begin
+                JET.test_package(MethodURL; target_defined_modules = true)
+            end
         end
 
         @testset "ExplicitImports.jl" begin
@@ -57,7 +55,7 @@ end
                 @test isnothing(check_all_explicit_imports_via_owners(MethodURL))
                 @test isnothing(
                     check_all_explicit_imports_are_public(
-                        MethodURL; ignore=(:PkgId, :UUID, :inbase)
+                        MethodURL; ignore = (:PkgId, :UUID, :inbase)
                     ),
                 )
             end
@@ -66,7 +64,7 @@ end
                 @test isnothing(check_no_self_qualified_accesses(MethodURL))
                 @test isnothing(
                     check_all_qualified_accesses_are_public(
-                        MethodURL; ignore=(:GIT_VERSION_INFO,)
+                        MethodURL; ignore = (:GIT_VERSION_INFO,)
                     ),
                 )
             end
