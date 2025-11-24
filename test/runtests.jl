@@ -26,7 +26,7 @@ using GPMaxlik: gnll # hosted on sourcehut
 
 function url_exists(url)
     url = replace(url, r"#.*$" => "") # strip line number
-    response = request("GET", url; status_exception=false, redirect=true, retry=true)
+    response = request("GET", url; status_exception = false, redirect = true, retry = true)
     if 200 ≤ response.status < 400
         return true
     else
@@ -55,7 +55,7 @@ end
                 @test isnothing(check_all_explicit_imports_via_owners(MethodURL))
                 @test isnothing(
                     check_all_explicit_imports_are_public(
-                        MethodURL; ignore=(:PkgId, :UUID, :inbase)
+                        MethodURL; ignore = (:PkgId, :UUID, :inbase)
                     ),
                 )
             end
@@ -64,7 +64,7 @@ end
                 @test isnothing(check_no_self_qualified_accesses(MethodURL))
                 @test isnothing(
                     check_all_qualified_accesses_are_public(
-                        MethodURL; ignore=(:GIT_VERSION_INFO,)
+                        MethodURL; ignore = (:GIT_VERSION_INFO,)
                     ),
                 )
             end
