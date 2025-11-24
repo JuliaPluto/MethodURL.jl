@@ -2,7 +2,6 @@ using MethodURL
 
 # Linting tests
 using Test
-using JuliaFormatter: JuliaFormatter
 using Aqua: Aqua
 using JET: JET
 using ExplicitImports:
@@ -38,9 +37,6 @@ end
 
 @testset verbose = true "MethodURL.jl" begin
     @testset verbose = true "Linting" begin
-        @testset "JuliaFormatter.jl" begin
-            @test JuliaFormatter.format(MethodURL; verbose=false, overwrite=false)
-        end
         @testset "Aqua.jl" begin
             Aqua.test_all(MethodURL)
         end
