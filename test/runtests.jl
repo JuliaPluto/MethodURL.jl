@@ -44,8 +44,10 @@ end
         @testset "Aqua.jl" begin
             Aqua.test_all(MethodURL)
         end
-        @testset "JET.jl" begin
-            JET.test_package(MethodURL; target_defined_modules=true)
+        if VERSION > v"1.11" # JET v0.11 requires Julia v1.12
+            @testset "JET tests" begin
+                JET.test_package(MethodURL; target_defined_modules = true)
+            end
         end
 
         @testset "ExplicitImports.jl" begin
