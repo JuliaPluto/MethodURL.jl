@@ -4,8 +4,10 @@ authors = ["Adrian Hill <gh@adrianhill.de>", "Kristoffer Carlsson"]
 version = "0.1.0-DEV"
 
 [deps]
+Downloads = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
 RegistryInstances = "2792f1a3-b283-48e8-9a74-f99dce5104f3"
 
 [compat]
+Downloads = "1"
 RegistryInstances = "0.1"
 julia = "1.10"

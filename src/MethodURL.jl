@@ -3,102 +3,283 @@
 
 module MethodURL
 
-using Base: PkgId, UUID, Sys, inbase
+using Base:
+    UUID,
+    Sys,
+    inbase,
+    load_path,
+    fixup_stdlib_path,
+    env_project_file,
+    project_file_manifest_path,
+    parsed_toml
 using RegistryInstances: reachable_registries, registry_info
+using Downloads: request, Response
 
 export url
 
-function repo_and_path_to_url(repo, version, path, line)
-    repo = chopsuffix(repo, ".git")
-    # TODO: Handle more git forges
+const JULIA_REPO = "https://github.com/JuliaLang/julia"
+
+"""
+    url(m::Method)
+
+Return a vector of URLs pointing to the source code of method `m`.
+
+URLs are constructed according to the origin of the method:
+- methods from `Base`, `Core` and stdlibs link to the matching release
+  in the JuliaLang/julia repository, or, for stdlibs that are vendored from
+  their own repository, to the exact vendored commit in that repository
+- methods from packages tracked by a local path (e.g. `Pkg.develop`ed) link
+  to the local file via a `file://` URL
+- methods from packages added by URL link to that repository at the tracked revision
+- methods from registered packages link to the repository listed in the registry
+  at the version tag of the loaded package; one URL is returned per registry
+  in which the package is found
+
+Throw an error if no URL can be constructed.
+"""
+function url(m::Method)
+    M = parentmodule(m)
+    file = fixup_stdlib_path(String(m.file))
+    line = m.line
+
+    if M === Core || inbase(M)
+        return [forge_url(JULIA_REPO, julia_ref(), :commit, "base/$file", line)]
+    end
+
+    dir = _pkgdir(M)
+    name, uuid = project_name_uuid(dir)
+
+    path = path_in_package(dir, file)
+
+    entry = manifest_entry(uuid)
+    if entry !== nothing && haskey(entry, "path")
+        # Package is tracked by a local path, e.g. through `Pkg.develop`
+        return ["file://$file#L$line"]
+    end
+
+    if entry !== nothing && haskey(entry, "repo-url")
+        # Package was added by URL, e.g. through `Pkg.add(; url=...)`
+        return [url_from_manifest_repo(entry, M, path, line)]
+    end
+
+    repos = repos_package(uuid)
+    if !isempty(repos)
+        # Package is registered: one URL per registry it is found in
+        version = _pkgversion(M)
+        return [registry_url(repo, subdir, name, version, path, line) for (repo, subdir) in repos]
+    end
+
+    if startswith(dir, Sys.STDLIB)
+        return [stdlib_url(basename(dir), path, line)]
+    end
+
+    error(
+        "Failed to construct URL for method `$m`: " *
+            "package $name [$uuid] was not found in any manifest, registry, or the stdlib.",
+    )
+end
+
+# Ref in the JuliaLang/julia repository corresponding to the running Julia version.
+function julia_ref()
+    commit = Base.GIT_VERSION_INFO.commit
+    return isempty(commit) ? "v$VERSION" : commit
+end
+
+# Construct a URL to a file and line on a known git forge.
+# `kind` distinguishes the type of `ref` (`:tag`, `:commit` or `:branch`)
+# for forges whose URL scheme depends on it.
+function forge_url(
+        repo::AbstractString,
+        ref::AbstractString,
+        kind::Symbol,
+        path::AbstractString,
+        line::Integer,
+    )
+    repo = chopsuffix(normalize_repo(repo), ".git")
     if startswith(repo, "https://github.com")
         # https://github.com/owner/Package.jl/blob/v0.1.0/src/foo.jl#L42
-        return join([repo, "blob", "v" * version, path * "#L$line"], "/")
+        return "$repo/blob/$ref/$path#L$line"
     elseif startswith(repo, "https://gitlab.com")
         # https://gitlab.com/owner/Package.jl/-/blob/v0.1.0/src/foo.jl#L42
-        return join([repo, "-", "blob", "v" * version, path * "#L$line"], "/")
+        return "$repo/-/blob/$ref/$path#L$line"
     elseif startswith(repo, "https://git.sr.ht")
         # https://git.sr.ht/~owner/Package.jl/tree/v0.1.0/item/src/foo.jl#L42
-        return join([repo, "tree", "v" * version, "item", path * "#L$line"], "/")
+        return "$repo/tree/$ref/item/$path#L$line"
+    elseif startswith(repo, "https://bitbucket.org")
+        # https://bitbucket.org/owner/Package.jl/src/v0.1.0/src/foo.jl#lines-42
+        return "$repo/src/$ref/$path#lines-$line"
+    elseif startswith(repo, "https://codeberg.org")
+        # https://codeberg.org/owner/Package.jl/src/tag/v0.1.0/src/foo.jl#L42
+        segment = kind === :tag ? "tag" : kind === :commit ? "commit" : "branch"
+        return "$repo/src/$segment/$ref/$path#L$line"
     else
-        error("Failed to construct URL for repository $repo.")
+        error("Failed to construct URL for unknown git forge of repository $repo.")
     end
 end
 
-# Find repository in reachable registries by looking up UUID
-function repos_package(uuid::UUID)
-    repos = String[]
-    for reg in reachable_registries()
-        entry = get(reg, uuid, nothing)
-        if entry !== nothing
-            info = registry_info(entry)
-            push!(repos, info.repo)
-        end
-    end
-    return repos
+# Turn scp-like git remotes (`git@github.com:owner/Repo.jl.git`) into HTTPS URLs.
+function normalize_repo(repo::AbstractString)
+    m = match(r"^git@([^:]+):(.+)$", repo)
+    return m === nothing ? String(repo) : "https://$(m.captures[1])/$(m.captures[2])"
 end
 
-# Return errors instead of `nothing`
-function _uuid(M::Module)
-    uuid = PkgId(M).uuid
-    isnothing(uuid) && error("Failed to find UUID of package $M.")
-    return uuid
+# Path of `file` relative to the package root directory `dir`,
+# joined with forward slashes for use in URLs.
+function path_in_package(dir::AbstractString, file::AbstractString)
+    parts = splitpath(relpath(file, dir))
+    if !isabspath(file) || isempty(parts) || first(parts) == ".."
+        error("Failed to construct URL: file $file is not part of the package at $dir.")
+    end
+    return join(parts, "/")
 end
 
 # Return errors instead of `nothing`
 function _pkgdir(M::Module)
     dir = pkgdir(M)
-    isnothing(dir) && error("Failed to find directory of package $M.")
+    isnothing(dir) && error("Failed to find package directory of module $M.")
     return dir
 end
 
-# TODO: is this heuristic sufficient?
-instdlib(pkgdir) = contains(pkgdir, Sys.STDLIB)
+# Return errors instead of `nothing`
+function _pkgversion(M::Module)
+    version = pkgversion(M)
+    isnothing(version) && error("Failed to find version of package $M.")
+    return version
+end
 
-# TODO: If package is devved use local path
-# TODO: If package is added by URL, use that
-# TODO: Support monorepos
-function url(m::Method)
-    M = parentmodule(m)
-    file = String(m.file)
-    line = m.line
-
-    urls = String[]
-    if inbase(M)
-        # adapted from https://github.com/JuliaLang/julia/blob/8f5b7ca12ad48c6d740e058312fc8cf2bbe67848/base/methodshow.jl#L382-L388
-        commit = Base.GIT_VERSION_INFO.commit
-        if isempty(commit)
-            url = "https://github.com/JuliaLang/julia/tree/v$VERSION/base/$file#L$line"
-        else
-            url = "https://github.com/JuliaLang/julia/tree/$commit/base/$file#L$line"
+# Package name and UUID from the Project.toml in the package directory.
+# Unlike `Base.PkgId`, this also gives the parent package for package extensions,
+# whose files live in the parent package repository.
+function project_name_uuid(dir::AbstractString)
+    for project in ("JuliaProject.toml", "Project.toml")
+        file = joinpath(dir, project)
+        isfile(file) || continue
+        d = parsed_toml(file)
+        name = get(d, "name", nothing)
+        uuid = get(d, "uuid", nothing)
+        if name isa String && uuid isa String
+            return name, UUID(uuid)
         end
-        push!(urls, url)
-    else
-        uuid = _uuid(M)
-        repos = repos_package(uuid)
-        pkgdir = _pkgdir(M)
+    end
+    error("Failed to find name and UUID of the package at $dir.")
+end
 
-        if isempty(repos) && instdlib(pkgdir) # stdlib package
-            package, file = match(r"/stdlib/v(?:.*?)/(.*?)/src/(.*)", file).captures
-            url = "https://github.com/JuliaLang/julia/blob/v$VERSION/stdlib/$package/src/$file#L$line"
-            push!(urls, url)
-        else # external package
-            pkg_splitpath = splitpath(pkgdir)
-            file_splitpath = splitpath(file)
-            while !isempty(pkg_splitpath) && first(pkg_splitpath) == first(file_splitpath)
-                popfirst!(pkg_splitpath)
-                popfirst!(file_splitpath)
-            end
-            local_dir = join(file_splitpath, "/")
-
-            v = string(pkgversion(M))
-            for repo in repos
-                url = repo_and_path_to_url(repo, v, local_dir, line)
-                push!(urls, url)
+# Manifest entry of the package `uuid`, searched through all environments
+# in the load path, or `nothing` if the package is not listed in any manifest.
+function manifest_entry(uuid::UUID)
+    for env in load_path()
+        project = env_project_file(env)
+        project isa String || continue
+        manifest = project_file_manifest_path(project)
+        manifest isa String || continue
+        isfile(manifest) || continue
+        raw = parsed_toml(manifest)
+        deps = get(raw, "deps", raw) # manifest format 2 stores entries under "deps"
+        deps isa AbstractDict || continue
+        for (_, entries) in deps
+            entries isa AbstractVector || continue
+            for entry in entries
+                entry isa AbstractDict || continue
+                if get(entry, "uuid", nothing) == string(uuid)
+                    return entry
+                end
             end
         end
     end
-    return urls
+    return nothing
+end
+
+# URL into the repository a package was added from by URL,
+# at the tracked revision if one is recorded, otherwise at the version tag.
+function url_from_manifest_repo(entry::AbstractDict, M::Module, path, line)
+    repo = entry["repo-url"]
+    subdir = get(entry, "repo-subdir", nothing)
+    subdir isa String && (path = "$subdir/$path")
+    rev = get(entry, "repo-rev", nothing)
+    if rev isa String
+        kind = occursin(r"^[0-9a-f]{40}$", rev) ? :commit : :branch
+        return forge_url(repo, rev, kind, path, line)
+    else
+        return forge_url(repo, "v$(_pkgversion(M))", :tag, path, line)
+    end
+end
+
+# Find repository and subdirectory in reachable registries by looking up UUID
+function repos_package(uuid::UUID)
+    repos = Tuple{String, Union{Nothing, String}}[]
+    for reg in reachable_registries()
+        entry = get(reg, uuid, nothing)
+        if entry !== nothing
+            info = registry_info(entry)
+            info.repo isa String && push!(repos, (info.repo, info.subdir))
+        end
+    end
+    return repos
+end
+
+# URL into the registered repository of a package at its version tag.
+# Packages in a monorepo subdirectory are tagged `<name>-v<version>`
+# (the TagBot convention) and their path is prefixed with the subdirectory.
+function registry_url(
+        repo::AbstractString,
+        subdir::Union{Nothing, AbstractString},
+        name::AbstractString,
+        version::VersionNumber,
+        path::AbstractString,
+        line::Integer,
+    )
+    if subdir === nothing
+        return forge_url(repo, "v$version", :tag, path, line)
+    else
+        return forge_url(repo, "$name-v$version", :tag, "$subdir/$path", line)
+    end
+end
+
+# Some stdlibs are vendored from their own repository (e.g. Pkg.jl) and their
+# source code is not part of the JuliaLang/julia repository. The exact vendored
+# commit is recorded in `stdlib/<name>.version` files in the julia repository,
+# which are not shipped with Julia and therefore have to be fetched.
+# Cache: stdlib name => `nothing` (source is in the julia repo) or (repo, sha).
+const STDLIB_VERSION_CACHE = Dict{String, Union{Nothing, Tuple{String, String}}}()
+const STDLIB_VERSION_LOCK = ReentrantLock()
+
+function stdlib_repo_and_sha(name::AbstractString)
+    return lock(STDLIB_VERSION_LOCK) do
+        get!(STDLIB_VERSION_CACHE, name) do
+            fetch_stdlib_repo_and_sha(name)
+        end
+    end
+end
+
+function fetch_stdlib_repo_and_sha(name::AbstractString)
+    file_url = "https://raw.githubusercontent.com/JuliaLang/julia/$(julia_ref())/stdlib/$name.version"
+    buffer = IOBuffer()
+    response = request(file_url; output = buffer, throw = false)
+    if response isa Response && response.status == 200
+        content = String(take!(buffer))
+        sha = match(r"_SHA1\s*:?=\s*([0-9a-f]{40})", content)
+        repo = match(r"_GIT_URL\s*:?=\s*(\S+)", content)
+        if sha === nothing || repo === nothing
+            error("Failed to parse stdlib version file at $file_url.")
+        end
+        return (String(repo.captures[1]::AbstractString), String(sha.captures[1]::AbstractString))
+    elseif response isa Response && response.status == 404
+        return nothing # stdlib source is part of the julia repository
+    else
+        error("Failed to fetch stdlib version file at $file_url: $response")
+    end
+end
+
+# URL of a stdlib file, either in the JuliaLang/julia repository or,
+# for vendored stdlibs, in their own repository at the exact vendored commit.
+function stdlib_url(name::AbstractString, path::AbstractString, line::Integer)
+    repo_and_sha = stdlib_repo_and_sha(name)
+    if repo_and_sha === nothing
+        return forge_url(JULIA_REPO, julia_ref(), :commit, "stdlib/$name/$path", line)
+    else
+        repo, sha = repo_and_sha
+        return forge_url(repo, sha, :commit, path, line)
+    end
 end
 
 end # module
