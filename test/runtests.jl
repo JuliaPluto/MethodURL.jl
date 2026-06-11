@@ -14,7 +14,7 @@ using ExplicitImports:
     check_all_qualified_accesses_are_public
 
 # Packages used for testing
-using HTTP: request
+using HTTP: HTTP, request
 using InteractiveUtils: @which
 using Pkg: Pkg
 
@@ -33,12 +33,37 @@ using BridgeStan: BridgeStan # monorepo released in lockstep with plain tags
 
 function url_exists(url)
     url = replace(url, r"#.*$" => "") # strip line number
-    response = request("GET", url; status_exception = false, redirect = true, retry = true)
+    response = try
+        request("GET", url; status_exception = false, redirect = true, retry = true)
+    catch e
+        # Some hosts (e.g. the self-hosted GitLab instance gitlab.gwdg.de)
+        # block requests from CI runner IP ranges. An unreachable host says
+        # nothing about URL correctness, so it is reported as `missing`
+        # rather than `false`, unlike an HTTP error status such as 404.
+        if e isa HTTP.ConnectError || e isa HTTP.TimeoutError
+            @warn "Host unreachable, cannot verify URL" url e
+            return missing
+        end
+        rethrow()
+    end
     if 200 ≤ response.status < 400
         return true
     else
         @warn "Failed to request URL" url response.status response
         return false
+    end
+end
+
+# Like `@test url_exists(url)`, but records a skipped test instead of a
+# failure when the host is unreachable and existence cannot be verified.
+macro test_url_exists(url)
+    return quote
+        exists = url_exists($(esc(url)))
+        if ismissing(exists)
+            @test_skip url_exists($(esc(url)))
+        else
+            @test exists
+        end
     end
 end
 
@@ -92,26 +117,26 @@ end
         @testset "Base" begin
             m = @which sqrt(0.0)
             u = first(@inferred url(m))
-            @test url_exists(u)
+            @test_url_exists u
         end
         @testset "Base submodule" begin
             m = @which Iterators.take([1], 1)
             u = first(@inferred url(m))
             @test contains(u, "/base/")
-            @test url_exists(u)
+            @test_url_exists u
         end
         @testset "Core" begin
             # `parentmodule` of methods in boot.jl is Core, which is not `inbase`
             m = first(methods(Core.eval))
             u = first(@inferred url(m))
             @test contains(u, "/base/boot.jl")
-            @test url_exists(u)
+            @test_url_exists u
         end
         @testset verbose = true "Stdlib" begin
             @testset "within julialang/julia" begin
                 m = @which @test true
                 u = first(@inferred url(m))
-                @test url_exists(u)
+                @test_url_exists u
             end
             @testset "vendored stdlib" begin
                 # LinearAlgebra is part of the julia repository up to Julia 1.11
@@ -123,7 +148,7 @@ end
                 if VERSION >= v"1.12"
                     @test contains(u, "LinearAlgebra.jl/blob/")
                 end
-                @test url_exists(u)
+                @test_url_exists u
             end
             @testset "standalone repository" begin
                 # Statistics is an upgradable stdlib with a standalone repository.
@@ -134,7 +159,7 @@ end
                 m = @which mean(rand(5))
                 u = first(@inferred url(m))
                 @test contains(u, "Statistics.jl/blob/")
-                @test url_exists(u)
+                @test_url_exists u
             end
         end
 
@@ -142,7 +167,7 @@ end
             @testset "GitHub" begin
                 m = @which Aqua.test_all(MethodURL)
                 u = first(@inferred url(m))
-                @test url_exists(u)
+                @test_url_exists u
             end
             @testset "GitHub monorepo" begin
                 # Plots.jl (>= v1.41.5) is a monorepo: the registry lists
@@ -152,7 +177,7 @@ end
                 u = first(@inferred url(m))
                 @test contains(u, "/Plots.jl/blob/Plots-v")
                 @test contains(u, "/Plots/src/")
-                @test url_exists(u)
+                @test_url_exists u
             end
             @testset "GitHub monorepo, version predating the monorepo" begin
                 # RecipesBase v1.3.4 was released from the standalone repository
@@ -167,7 +192,7 @@ end
                 if pkgversion(Plots.RecipesBase) <= v"1.3.4"
                     @test_broken url_exists(u) # no RecipesBase tags in Plots.jl
                 else
-                    @test url_exists(u)
+                    @test_url_exists u
                 end
             end
             @testset "GitHub monorepo without TagBot tags" begin
@@ -186,7 +211,7 @@ end
                 m = first(methods(TZJData.artifact_dir))
                 u = first(@inferred url(m))
                 @test contains(u, "+")
-                @test url_exists(u)
+                @test_url_exists u
             end
             @testset "JLL package" begin
                 # Most methods of JLL packages are generated by macros from
@@ -197,7 +222,7 @@ end
                 @test contains(string(m.file), "JLLWrappers")
                 u = first(@inferred url(m))
                 @test contains(u, "/JLLWrappers.jl/blob/v")
-                @test url_exists(u)
+                @test_url_exists u
                 # `__init__` is generated into the platform-specific wrapper
                 # file that is part of the JLL package itself. JLL
                 # repositories drop the `_jll` suffix from release tags
@@ -206,7 +231,7 @@ end
                 u = first(@inferred url(m))
                 @test contains(u, "/Bzip2_jll.jl/blob/Bzip2-v")
                 @test contains(u, "/src/wrappers/")
-                @test url_exists(u)
+                @test_url_exists u
             end
             @testset "Package extension" begin
                 # Methods of package extensions live in the repository
@@ -216,7 +241,7 @@ end
                 m = first(methods(ext.fixaxis!))
                 u = first(@inferred url(m))
                 @test contains(u, "/ext/UnitfulExt.jl")
-                @test url_exists(u)
+                @test_url_exists u
             end
             @testset "GitLab" begin
                 m = @which arXiv"1234.5678"
@@ -251,7 +276,7 @@ end
                 u = first(@inferred url(m))
                 @test contains(u, "https://gitlab.gwdg.de/")
                 @test contains(u, "/-/blob/")
-                @test url_exists(u)
+                @test_url_exists u
             end
         end
 
@@ -286,7 +311,7 @@ end
                     u = first(@inferred url(m))
                     @test u ==
                         "https://github.com/JuliaLang/Example.jl/blob/master/src/Example.jl#L$(m.line)"
-                    @test url_exists(u)
+                    @test_url_exists u
                 end
             finally
                 Pkg.activate(old_project; io = devnull)
