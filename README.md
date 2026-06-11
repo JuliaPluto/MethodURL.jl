@@ -21,6 +21,20 @@ julia> MethodURL.url(
 
 ```
 
+URLs are constructed according to the origin of the method:
+
+- Methods from `Base`, `Core` and stdlibs link to the matching release in the [JuliaLang/julia](https://github.com/JuliaLang/julia) repository.
+  Stdlibs that are vendored from their own repository (e.g. Pkg.jl, LinearAlgebra.jl on Julia ≥ 1.12) link to the exact vendored commit in that repository.
+- Methods from packages tracked by a local path (e.g. via `Pkg.develop`) link to the local file via a `file://` URL.
+- Methods from packages added by URL link to that repository at the tracked revision.
+- Methods from registered packages link to the repository listed in the registry at the version tag of the loaded package, including packages in monorepo subdirectories and package extensions.
+  One URL is returned per registry the package is found in.
+
+Supported git forges: GitHub, GitLab (including self-hosted instances), sourcehut, Bitbucket and Codeberg.
+An error is thrown if no URL can be constructed.
+
+Note that a constructed URL can still point to a non-existent page,
+e.g. if a package release was never tagged in its repository.
 
 # Context
 
