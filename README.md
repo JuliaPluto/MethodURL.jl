@@ -34,7 +34,9 @@ Supported git forges: GitHub, GitLab (including self-hosted instances), sourcehu
 
 If no URL can be constructed, `url` throws a `MethodURLError`.
 Its `reason` field identifies the cause of the failure, e.g. `:no_package_dir` for methods that do not belong to a package, such as methods defined in the REPL.
-The non-throwing variant `tryurl` returns the `MethodURLError` instead of throwing it:
+The non-throwing variant `tryurl` returns the `MethodURLError` instead of throwing it.
+In the following example, the queried method is that of an anonymous function defined in the REPL,
+which belongs to the module `Main` rather than any package, so there is no source repository to link to:
 
 ```julia
 julia> MethodURL.tryurl(methods(x -> x^2)[1])
