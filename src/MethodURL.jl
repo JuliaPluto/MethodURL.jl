@@ -104,19 +104,22 @@ function forge_url(
         line::Integer,
     )
     repo = chopsuffix(normalize_repo(repo), ".git")
-    if startswith(repo, "https://github.com")
+    host_match = match(r"^https://([^/]+)", repo)
+    host = isnothing(host_match) ? "" : host_match[1]::SubString{String}
+    if host == "github.com"
         # https://github.com/owner/Package.jl/blob/v0.1.0/src/foo.jl#L42
         return "$repo/blob/$ref/$path#L$line"
-    elseif startswith(repo, "https://gitlab.com")
+    elseif host == "gitlab.com" || startswith(host, "gitlab.")
+        # GitLab.com and self-hosted GitLab instances (e.g. gitlab.gwdg.de)
         # https://gitlab.com/owner/Package.jl/-/blob/v0.1.0/src/foo.jl#L42
         return "$repo/-/blob/$ref/$path#L$line"
-    elseif startswith(repo, "https://git.sr.ht")
+    elseif host == "git.sr.ht"
         # https://git.sr.ht/~owner/Package.jl/tree/v0.1.0/item/src/foo.jl#L42
         return "$repo/tree/$ref/item/$path#L$line"
-    elseif startswith(repo, "https://bitbucket.org")
+    elseif host == "bitbucket.org"
         # https://bitbucket.org/owner/Package.jl/src/v0.1.0/src/foo.jl#lines-42
         return "$repo/src/$ref/$path#lines-$line"
-    elseif startswith(repo, "https://codeberg.org")
+    elseif host == "codeberg.org"
         # https://codeberg.org/owner/Package.jl/src/tag/v0.1.0/src/foo.jl#L42
         segment = kind === :tag ? "tag" : kind === :commit ? "commit" : "branch"
         return "$repo/src/$segment/$ref/$path#L$line"

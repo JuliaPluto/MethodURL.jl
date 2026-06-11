@@ -25,6 +25,7 @@ using Plots: Plots # monorepo with sub-packages and package extensions
 using Unitful: Unitful # triggers the Plots extension UnitfulExt
 using Arxiv: @arXiv_str # hosted on GitLab
 using GPMaxlik: gnll # hosted on sourcehut
+using InPartS: InPartS # hosted on a self-hosted GitLab instance
 
 function url_exists(url)
     url = replace(url, r"#.*$" => "") # strip line number
@@ -187,6 +188,16 @@ end
                 @test contains(u, "/tree/") && contains(u, "/item/")
                 @test_broken url_exists(u) # no tags in GPMaxlik.jl
             end
+            @testset "Self-hosted GitLab" begin
+                # InPartS.jl is registered with the repository URL
+                # https://gitlab.gwdg.de/eDLS/InPartS.jl. Self-hosted GitLab
+                # instances are recognized by their `gitlab.` host prefix.
+                m = first(methods(InPartS.unitvector))
+                u = first(@inferred url(m))
+                @test contains(u, "https://gitlab.gwdg.de/")
+                @test contains(u, "/-/blob/")
+                @test url_exists(u)
+            end
         end
 
         @testset "Local package tracked by path" begin
@@ -273,6 +284,9 @@ end
                         "https://github.com/owner/Package.jl/blob/v1.0.0/src/foo.jl#L42",
                     "https://gitlab.com/owner/Package.jl.git" =>
                         "https://gitlab.com/owner/Package.jl/-/blob/v1.0.0/src/foo.jl#L42",
+                    # self-hosted GitLab instances are recognized by host prefix
+                    "https://gitlab.example.org/owner/Package.jl.git" =>
+                        "https://gitlab.example.org/owner/Package.jl/-/blob/v1.0.0/src/foo.jl#L42",
                     "https://git.sr.ht/~owner/Package.jl" =>
                         "https://git.sr.ht/~owner/Package.jl/tree/v1.0.0/item/src/foo.jl#L42",
                     "https://bitbucket.org/owner/Package.jl.git" =>

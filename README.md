@@ -30,7 +30,7 @@ URLs are constructed according to the origin of the method:
 - Methods from registered packages link to the repository listed in the registry at the version tag of the loaded package, including packages in monorepo subdirectories and package extensions.
   One URL is returned per registry the package is found in.
 
-Supported git forges: GitHub, GitLab, sourcehut, Bitbucket and Codeberg.
+Supported git forges: GitHub, GitLab (including self-hosted instances), sourcehut, Bitbucket and Codeberg.
 An error is thrown if no URL can be constructed.
 
 Note that a constructed URL can still point to a non-existent page,
