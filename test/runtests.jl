@@ -47,7 +47,7 @@ end
         @testset "Aqua.jl" begin
             Aqua.test_all(MethodURL)
         end
-        if VERSION > v"1.11" # JET v0.11 requires Julia v1.12
+        if v"1.12" <= VERSION < v"1.13" # JET v0.11 only supports Julia v1.12
             @testset "JET tests" begin
                 JET.test_package(MethodURL; target_defined_modules = true)
             end
