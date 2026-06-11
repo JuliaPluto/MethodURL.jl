@@ -16,9 +16,38 @@ using Base:
 using RegistryInstances: reachable_registries, registry_info
 using Downloads: request, Response
 
-export url
+export url, tryurl, MethodURLError
 
 const JULIA_REPO = "https://github.com/JuliaLang/julia"
+
+"""
+    MethodURLError(reason::Symbol, msg::String)
+
+Error thrown by [`url`](@ref) and returned by [`tryurl`](@ref)
+when no URL can be constructed for a method.
+
+The `reason` field identifies the cause of the failure:
+- `:no_package_dir`: the parent module does not belong to a package,
+  e.g. for methods defined in the REPL, a notebook or a script
+- `:no_project`: the package directory contains no Project.toml with a name and UUID
+- `:file_not_found`: the method's file is not part of the package,
+  e.g. for methods evaluated from strings
+- `:no_version`: the version of the package could not be determined
+- `:unknown_forge`: the repository is hosted on an unsupported git forge
+- `:package_not_found`: the package is not listed in any manifest or registry
+  and is not a stdlib
+- `:network`: fetching a stdlib version file from the JuliaLang/julia repository failed,
+  e.g. when offline
+- `:parse`: a fetched stdlib version file could not be parsed
+
+The `msg` field contains a human-readable description of the failure.
+"""
+struct MethodURLError <: Exception
+    reason::Symbol
+    msg::String
+end
+
+Base.showerror(io::IO, e::MethodURLError) = print(io, "MethodURLError: ", e.msg)
 
 """
     url(m::Method)
@@ -43,9 +72,42 @@ Constructing stdlib URLs requires fetching a `<name>.version` file from the
 JuliaLang/julia repository, so calling `url` on stdlib methods can access the
 network. The result of this lookup is cached for the lifetime of the session.
 
-Throw an error if no URL can be constructed.
+Throw a [`MethodURLError`](@ref) if no URL can be constructed.
+See [`tryurl`](@ref) for a non-throwing variant.
 """
 function url(m::Method)
+    result = tryurl(m)
+    result isa MethodURLError && throw(result)
+    return result
+end
+
+"""
+    tryurl(m::Method)
+
+Like [`url`](@ref), but return a [`MethodURLError`](@ref) instead of throwing it
+when no URL can be constructed.
+
+The `reason` field of the returned error allows handling failure causes
+programmatically, e.g. ignoring methods that do not belong to a package:
+
+```julia
+result = tryurl(m)
+if result isa Vector{String}
+    # use the URLs
+elseif result.reason !== :no_package_dir
+    @warn result.msg
+end
+```
+"""
+function tryurl(m::Method)
+    return try
+        _url(m)
+    catch e
+        e isa MethodURLError ? e : rethrow()
+    end
+end
+
+function _url(m::Method)
     M = parentmodule(m)
     file = fixup_stdlib_path(String(m.file))
     line = m.line
@@ -94,7 +156,8 @@ function url(m::Method)
     end
 
     throw(
-        ArgumentError(
+        MethodURLError(
+            :package_not_found,
             "Failed to construct URL for method `$m`: " *
                 "package $name [$uuid] was not found in any manifest, registry, or the stdlib.",
         ),
@@ -138,7 +201,12 @@ function forge_url(
         segment = kind === :tag ? "tag" : kind === :commit ? "commit" : "branch"
         return "$repo/src/$segment/$ref/$path#L$line"
     else
-        throw(ArgumentError("Failed to construct URL for unknown git forge of repository $repo."))
+        throw(
+            MethodURLError(
+                :unknown_forge,
+                "Failed to construct URL for unknown git forge of repository $repo.",
+            ),
+        )
     end
 end
 
@@ -152,7 +220,11 @@ end
 # (also before Windows drive letters) and percent-encoded spaces.
 function file_url(file::AbstractString, line::Integer)
     if !isabspath(file)
-        throw(ArgumentError("Failed to construct URL: $file is not an absolute file path."))
+        throw(
+            MethodURLError(
+                :file_not_found, "Failed to construct URL: $file is not an absolute file path."
+            ),
+        )
     end
     path = replace(file, '\\' => '/', ' ' => "%20")
     if !startswith(path, "/")
@@ -166,7 +238,12 @@ end
 function path_in_package(dir::AbstractString, file::AbstractString)
     parts = splitpath(relpath(file, dir))
     if !isabspath(file) || first(parts) == ".."
-        throw(ArgumentError("Failed to construct URL: file $file is not part of the package at $dir."))
+        throw(
+            MethodURLError(
+                :file_not_found,
+                "Failed to construct URL: file $file is not part of the package at $dir.",
+            ),
+        )
     end
     return join(parts, "/")
 end
@@ -196,14 +273,16 @@ end
 # Like `pkgdir`, but throws instead of returning `nothing`
 function _pkgdir(M::Module)
     dir = pkgdir(M)
-    isnothing(dir) && throw(ArgumentError("Failed to find package directory of module $M."))
+    isnothing(dir) &&
+        throw(MethodURLError(:no_package_dir, "Failed to find package directory of module $M."))
     return dir
 end
 
 # Like `pkgversion`, but throws instead of returning `nothing`
 function _pkgversion(M::Module)
     version = pkgversion(M)
-    isnothing(version) && throw(ArgumentError("Failed to find version of package $M."))
+    isnothing(version) &&
+        throw(MethodURLError(:no_version, "Failed to find version of package $M."))
     return version
 end
 
@@ -221,7 +300,7 @@ function project_name_uuid(dir::AbstractString)
             return name, UUID(uuid)
         end
     end
-    throw(ArgumentError("Failed to find name and UUID of the package at $dir."))
+    throw(MethodURLError(:no_project, "Failed to find name and UUID of the package at $dir."))
 end
 
 # Manifest entry of the package `uuid`, searched through all environments
@@ -323,16 +402,29 @@ function fetch_stdlib_repo_and_sha(name::AbstractString)
     version_url = "https://raw.githubusercontent.com/JuliaLang/julia/$(julia_ref())/stdlib/$name.version"
     buffer = IOBuffer()
     response = request(version_url; output = buffer, throw = false)
-    response isa Response || throw(response) # RequestError, e.g. when offline
+    if !(response isa Response) # RequestError, e.g. when offline
+        throw(
+            MethodURLError(
+                :network,
+                "Failed to fetch stdlib version file at $version_url: " *
+                    sprint(showerror, response),
+            ),
+        )
+    end
     response.status == 404 && return nothing # stdlib source is part of the julia repository
     if response.status != 200
-        error("Failed to fetch stdlib version file at $version_url (HTTP status $(response.status)).")
+        throw(
+            MethodURLError(
+                :network,
+                "Failed to fetch stdlib version file at $version_url (HTTP status $(response.status)).",
+            ),
+        )
     end
     content = String(take!(buffer))
     sha = match(r"_SHA1\s*:?=\s*([0-9a-f]{40})", content)
     repo = match(r"_GIT_URL\s*:?=\s*(\S+)", content)
     if isnothing(sha) || isnothing(repo)
-        error("Failed to parse stdlib version file at $version_url.")
+        throw(MethodURLError(:parse, "Failed to parse stdlib version file at $version_url."))
     end
     return (String(something(repo[1])), String(something(sha[1])))
 end

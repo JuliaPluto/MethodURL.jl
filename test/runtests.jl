@@ -297,11 +297,18 @@ end
             @testset "Method defined in Main" begin
                 f_in_main() = 1
                 m = first(methods(f_in_main))
-                @test_throws ArgumentError url(m)
+                @test_throws MethodURLError url(m)
+                e = @inferred Union{Vector{String}, MethodURLError} tryurl(m)
+                @test e isa MethodURLError
+                @test e.reason === :no_package_dir
+                @test contains(sprint(showerror, e), "MethodURLError: Failed to find")
             end
             @testset "Anonymous function defined in Main" begin
                 m = first(methods(x -> x^2))
-                @test_throws ArgumentError url(m)
+                @test_throws MethodURLError url(m)
+                e = tryurl(m)
+                @test e isa MethodURLError
+                @test e.reason === :no_package_dir
             end
             @testset "Method eval'd into a package" begin
                 # Parsing from a string gives the method the file "none",
@@ -309,12 +316,21 @@ end
                 Core.eval(MethodURL, Meta.parse("__dummy_method_for_testing() = 1"))
                 m = first(methods(MethodURL.__dummy_method_for_testing))
                 @test m.file === :none
-                @test_throws ArgumentError url(m)
+                @test_throws MethodURLError url(m)
+                e = tryurl(m)
+                @test e isa MethodURLError
+                @test e.reason === :file_not_found
             end
             @testset "Unknown git forge" begin
-                @test_throws ArgumentError MethodURL.forge_url(
+                @test_throws MethodURLError MethodURL.forge_url(
                     "https://example.com/owner/Package.jl.git", "v1.0.0", :tag, "src/foo.jl", 1
                 )
+            end
+            @testset "tryurl on a registered package" begin
+                m = @which Aqua.test_all(MethodURL)
+                result = @inferred Union{Vector{String}, MethodURLError} tryurl(m)
+                @test result isa Vector{String}
+                @test result == url(m)
             end
         end
 
@@ -330,7 +346,7 @@ end
                     "file:///C:/Users/u/pkg/src/foo.jl#L3"
             end
             # Relative paths cannot be turned into file URLs
-            @test_throws ArgumentError MethodURL.file_url("none", 1)
+            @test_throws MethodURLError MethodURL.file_url("none", 1)
         end
 
         @testset "URL construction for git forges" begin
