@@ -65,6 +65,7 @@ end
                         MethodURL;
                         ignore = (
                             :UUID,
+                            :load_path, # public only since Julia 1.11
                             :inbase,
                             :fixup_stdlib_path,
                             :env_project_file,
