@@ -31,7 +31,17 @@ URLs are constructed according to the origin of the method:
   One URL is returned per registry the package is found in.
 
 Supported git forges: GitHub, GitLab (including self-hosted instances), sourcehut, Bitbucket and Codeberg.
-An error is thrown if no URL can be constructed.
+
+If no URL can be constructed, `url` throws a `MethodURLError`.
+Its `reason` field identifies the cause of the failure, e.g. `:no_package_dir` for methods that do not belong to a package, such as methods defined in the REPL.
+The non-throwing variant `tryurl` returns the `MethodURLError` instead of throwing it.
+In the following example, the queried method is that of an anonymous function defined in the REPL,
+which belongs to the module `Main` rather than any package, so there is no source repository to link to:
+
+```julia
+julia> MethodURL.tryurl(methods(x -> x^2)[1])
+MethodURLError(:no_package_dir, "Failed to find package directory of module Main.")
+```
 
 Note that a constructed URL can still point to a non-existent page,
 e.g. if a package release was never tagged in its repository.
