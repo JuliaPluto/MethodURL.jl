@@ -65,6 +65,7 @@ end
                             :env_project_file,
                             :project_file_manifest_path,
                             :parsed_toml,
+                            :project_names,
                         ),
                     ),
                 )
@@ -118,13 +119,15 @@ end
                 @test url_exists(u)
             end
             @testset "standalone repository" begin
+                # Statistics is an upgradable stdlib with a standalone repository.
+                # When loaded from the stdlib directory (e.g. on Julia 1.10), the URL
+                # points to the exact vendored commit, which always exists (unlike
+                # version tags, e.g. the missing tag for Statistics.jl v1.10.0).
+                # When upgraded through the registry, it points to the version tag.
                 m = @which mean(rand(5))
                 u = first(@inferred url(m))
-                if VERSION >= v"1.11"
-                    @test url_exists(u)
-                else
-                    @test_broken url_exists(u) # no tag for Statistics.jl v1.10.0
-                end
+                @test contains(u, "Statistics.jl/blob/")
+                @test url_exists(u)
             end
         end
 
@@ -192,7 +195,7 @@ end
             m = @which url(@which sqrt(1.0))
             u = first(@inferred url(m))
             @test startswith(u, "file://")
-            local_path = replace(chopprefix(u, "file://"), r"#L\d+$" => "")
+            local_path = replace(chopprefix(u, "file://"), r"#L\d+$" => "", "%20" => " ")
             @test isfile(local_path)
         end
 
@@ -228,25 +231,40 @@ end
             @testset "Method defined in Main" begin
                 f_in_main() = 1
                 m = first(methods(f_in_main))
-                @test_throws ErrorException url(m)
+                @test_throws ArgumentError url(m)
             end
             @testset "Anonymous function defined in Main" begin
                 m = first(methods(x -> x^2))
-                @test_throws ErrorException url(m)
+                @test_throws ArgumentError url(m)
             end
             @testset "Method eval'd into a package" begin
                 # Parsing from a string gives the method the file "none",
-                # which does not exist in the package directory
+                # which is not an absolute path to a file in the package
                 Core.eval(MethodURL, Meta.parse("__dummy_method_for_testing() = 1"))
                 m = first(methods(MethodURL.__dummy_method_for_testing))
                 @test m.file === :none
-                @test_throws ErrorException url(m)
+                @test_throws ArgumentError url(m)
             end
             @testset "Unknown git forge" begin
-                @test_throws ErrorException MethodURL.forge_url(
+                @test_throws ArgumentError MethodURL.forge_url(
                     "https://example.com/owner/Package.jl.git", "v1.0.0", :tag, "src/foo.jl", 1
                 )
             end
+        end
+
+        @testset "File URL construction" begin
+            @test MethodURL.file_url("/home/user/pkg/src/foo.jl", 3) ==
+                "file:///home/user/pkg/src/foo.jl#L3"
+            # Spaces are percent-encoded
+            @test MethodURL.file_url("/home/us er/pkg/src/foo.jl", 3) ==
+                "file:///home/us%20er/pkg/src/foo.jl#L3"
+            if Sys.iswindows()
+                # Windows paths use forward slashes and a leading slash before the drive
+                @test MethodURL.file_url("C:\\Users\\u\\pkg\\src\\foo.jl", 3) ==
+                    "file:///C:/Users/u/pkg/src/foo.jl#L3"
+            end
+            # Relative paths cannot be turned into file URLs
+            @test_throws ArgumentError MethodURL.file_url("none", 1)
         end
 
         @testset "URL construction for git forges" begin
