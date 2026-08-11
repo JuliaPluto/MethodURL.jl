@@ -1,7 +1,7 @@
 name = "MethodURL"
 uuid = "461c4225-bb7a-4706-8416-467e5545dbd6"
 authors = ["Adrian Hill <gh@adrianhill.de>", "Kristoffer Carlsson"]
-version = "0.1.0-DEV"
+version = "0.1.0"
 
 [deps]
 Downloads = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
